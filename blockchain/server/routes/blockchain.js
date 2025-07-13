@@ -1,24 +1,26 @@
-import { Router } from "express"
-import multer from "multer"
-import fs from "fs"
-import path from "path"
-import crypto from "crypto"
-import { JsonRpcProvider, Wallet, Contract, ethers } from "ethers"
-import dotenv from "dotenv"
-import { fileURLToPath } from "url"
-import { dirname } from "path"
+const express = require('express')
+const multer = require('multer')
+const fs = require('fs')
+const path = require('path')
+const crypto = require('crypto')
+const { JsonRpcProvider, Wallet, Contract, ethers } = require('ethers')
+const dotenv = require('dotenv')
+const path = require("path")
+const fs = require("fs")
+const { v4: uuidv4 } = require("uuid")
+const sha256 = require("crypto-js/sha256")
+const ethers = require("ethers")
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-
-dotenv.config({ path: path.join(__dirname, '../.env') })
 
 const upload = multer({ storage: multer.memoryStorage() })
-const router = Router()
+const router = express.Router()
+
+const __dirname = path.resolve()
+dotenv.config({ path: path.join(__dirname, '.env') })
 
 const provider = new JsonRpcProvider("http://127.0.0.1:8545")
 const wallet = new Wallet(process.env.PRIVATE_KEY, provider)
-const abiPath = path.join(__dirname, '../../artifacts/contracts/FileLedger.sol/FileLedger.json')
+const abiPath = path.join(__dirname, 'artifacts/contracts/FileLedger.sol/FileLedger.json')
 const abiJson = JSON.parse(fs.readFileSync(abiPath))
 const abi = abiJson.abi
 const contract = new Contract(process.env.CONTRACT_ADDRESS, abi, wallet)
@@ -38,10 +40,13 @@ router.post('/uploadFile', upload.single('file'), async (req, res) => {
     const file = req.file
     if (!file) return res.status(400).json({ error: 'File is required' })
 
+    const { originalName, receiverEmail, password, expiryMinutes } = req.body
+    const userId = req.headers["user-id"]
+
     const fileBuffer = file.buffer
     const fileName = file.originalname
     const fileSize = file.size
-    const fileHash = sha256(fileBuffer)
+    const fileHash = sha256(fileBuffer).toString()
 
     const isAlreadyUploaded = await contract.isFileRegistered(fileHash)
     if (isAlreadyUploaded) {
@@ -51,15 +56,46 @@ router.post('/uploadFile', upload.single('file'), async (req, res) => {
       })
     }
 
+    const uniqueFileName = Date.now() + "_" + fileName
+    const uploadDir = path.join(__dirname, "/uploads")
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir)
+
+    const uploadPath = path.join(uploadDir, uniqueFileName)
+    fs.writeFileSync(uploadPath, fileBuffer)
+
     const signature = await wallet.signMessage(ethers.getBytes(fileHash))
     const previousHash = await getPreviousHash(wallet.address)
 
     const tx = await contract.uploadFile(fileHash, signature, previousHash, fileName, fileSize)
     await tx.wait()
 
-    res.json({
-      message: "File upload success",
-      success: true,
+    const extension = path.extname(originalName)
+    const fileId = uuidv4()
+    const downloadLink = `${req.protocol}://${req.get("host")}/download/${fileId}`
+    const expiresAt = expiryMinutes
+      ? new Date(Date.now() + parseInt(expiryMinutes) * 60000)
+      : null
+
+    const newFile = new File({
+      fileName: uniqueFileName,
+      originalName,
+      path: uploadPath,
+      downloadLink,
+      extension,
+      password,
+      userId,
+      expiresAt
+    })
+
+    await newFile.save()
+
+    if (receiverEmail) {
+      await sendEmailMailjet(receiverEmail, fileId)
+    }
+
+    res.status(200).json({
+      message: "File uploaded successfully",
+      link: downloadLink,
       txHash: tx.hash,
       fileHash,
       signature,
@@ -71,7 +107,6 @@ router.post('/uploadFile', upload.single('file'), async (req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
-
 router.post('/verifyFile', upload.single('file'), async (req, res) => {
   try {
     const file = req.file
@@ -93,9 +128,6 @@ router.post('/verifyFile', upload.single('file'), async (req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
-
-
-
 
 router.get('/getAllFiles', async (req, res) => {
   try {
@@ -127,4 +159,4 @@ router.post('/checkExistence', upload.single('file'), async (req, res) => {
   }
 })
 
-export default router
+module.exports = router

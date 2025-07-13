@@ -10,8 +10,22 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "cors": "^2.8.5",
     "crypto": "^1.0.1",
-    "multer": "^2.0.1"
+    "dotenv": "^17.2.0",
+    "express": "^5.1.0",
+    "express-fileupload": "^1.5.2",
+    "express-mongo-sanitize": "^2.2.0",
+    "express-nosql-sanitizer": "^1.1.1",
+    "express-rate-limit": "^7.5.1",
+    "express-xss-sanitizer": "^2.0.0",
+    "fs": "^0.0.1-security",
+    "mongoose": "^8.16.3",
+    "multer": "^2.0.1",
+    "node-mailjet": "^6.0.8",
+    "path": "^0.12.7",
+    "uuid": "^11.1.0",
+    "xss-clean": "^0.1.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
